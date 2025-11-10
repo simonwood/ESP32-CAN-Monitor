@@ -189,7 +189,7 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         .id-option span { cursor: pointer; user-select: none; }
     </style>
     <script>
-        const POLL_MS = 600; // refresh interval for the latest table
+        const POLL_MS = 1000; // refresh interval for the latest table (1000ms = 1 update per second)
 
         async function updateLatest()
         {
@@ -489,10 +489,12 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         </div>
     </main>
     <script>
-        const GRID_POLL_MS = 600;
-        const ID_REFRESH_MS = 3000;
+        const GRID_POLL_MS = 1000; // refresh interval for filtered table (1000ms = 1 update per second)
+        const ID_REFRESH_MS = 3000; // refresh interval for ID list (3000ms = every 3 seconds)
         let selectedIds = new Set();
         let lastIdRefresh = 0;
+        let filteredPageIntervals = { gridInterval: null, idInterval: null };
+        let filteredPageInitialized = false;
 
         async function fetchIds()
         {
@@ -595,15 +597,39 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
 
         function startFilteredPage()
         {
+            // Prevent multiple initializations
+            if (filteredPageInitialized) {
+                return;
+            }
+            filteredPageInitialized = true;
+            
+            // Clear any existing intervals first
+            if (filteredPageIntervals.gridInterval !== null) {
+                clearInterval(filteredPageIntervals.gridInterval);
+            }
+            if (filteredPageIntervals.idInterval !== null) {
+                clearInterval(filteredPageIntervals.idInterval);
+            }
+            
+            // Fetch initial data
             fetchIds().then(fetchFilteredMessages);
-            setInterval(fetchFilteredMessages, GRID_POLL_MS);
-            setInterval(fetchIds, ID_REFRESH_MS);
+            
+            // Set up new intervals
+            filteredPageIntervals.gridInterval = setInterval(fetchFilteredMessages, GRID_POLL_MS);
+            filteredPageIntervals.idInterval = setInterval(fetchIds, ID_REFRESH_MS);
         }
 
         window.addEventListener('load', startFilteredPage);
     </script>
 </head>
 <body>
+</body>
+</html>
+)html";
+
+
+/*
+
     <h2>Filtered Recent Messages</h2>
     <p><a href="/">Back to main dashboard</a></p>
     <div class="filters">
@@ -626,9 +652,7 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         </thead>
         <tbody id="filtered_body"></tbody>
     </table>
-</body>
-</html>
-)html";
+*/
 
 // FILTERED_TEMPLATE is now part of HTML_TEMPLATE with client-side navigation
 // This constant is kept for backward compatibility with generateFilteredPage()
