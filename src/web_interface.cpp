@@ -135,9 +135,9 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         .transmit-field { display: flex; flex-direction: column; }
         .transmit-field label { font-weight: bold; margin-bottom: 4px; font-size: 0.9em; }
         .transmit-field input { padding: 6px; border: 1px solid #ccc; border-radius: 3px; font-family: monospace; }
-        .transmit-field input[type="number"] { width: 80px; }
+        .transmit-field input[type="number"] { width: 100px; }
         .transmit-field input[type="text"] { width: 150px; }
-        .byte-input { width: 50px; }
+        .byte-input { width: 60px !important; text-align: center; text-transform: uppercase; }
         button { padding: 8px 16px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 3px; }
         button:hover { background-color: #45a049; }
         .status-message { margin-top: 8px; padding: 8px; border-radius: 3px; display: none; }
@@ -217,12 +217,15 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
             const constrainedLength = Math.min(Math.max(length, 0), 8);
             document.getElementById('tx_length').value = constrainedLength;
             
+            // All byte inputs are always visible, just update disabled state for clarity
             for (let i = 0; i < 8; i++) {
                 const input = document.getElementById('tx_byte_' + i);
                 if (i < constrainedLength) {
-                    input.style.display = 'inline-block';
+                    input.style.opacity = '1.0';
+                    input.disabled = false;
                 } else {
-                    input.style.display = 'none';
+                    input.style.opacity = '0.5';
+                    input.disabled = true;
                     input.value = '';
                 }
             }
@@ -324,32 +327,54 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
     <div class="transmit-section">
         <h2>Transmit Message</h2>
         <p style="font-size: 0.9em; color: #666; margin: 0 0 12px 0;">Click a row above to copy its data, or enter values manually</p>
-        <div class="transmit-row">
+        <div style="display: flex; gap: 24px; margin-bottom: 12px;">
             <div class="transmit-field">
                 <label for="tx_id">ID (hex)</label>
                 <input type="text" id="tx_id" placeholder="123" />
             </div>
             <div class="transmit-field">
-                <label for="tx_length">Length</label>
-                <input type="number" id="tx_length" min="0" max="8" value="0" onchange="updateByteInputs()" />
+                <label for="tx_length">Length (bytes)</label>
+                <input type="number" id="tx_length" min="0" max="8" value="1" onchange="updateByteInputs()" />
             </div>
-            <div id="tx_bytes_container" style="display: flex; gap: 6px; align-items: flex-end;">
-                <div class="transmit-field">
-                    <label>Data (hex)</label>
-                    <div style="display: flex; gap: 4px;">
-                        <input type="text" id="tx_byte_0" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_1" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_2" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_3" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_4" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_5" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_6" class="byte-input" placeholder="00" />
-                        <input type="text" id="tx_byte_7" class="byte-input" placeholder="00" />
-                    </div>
+        </div>
+        <div style="margin-bottom: 12px;">
+            <label style="font-weight: bold; display: block; margin-bottom: 8px;">Data (hex bytes)</label>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 0</label>
+                    <input type="text" id="tx_byte_0" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 1</label>
+                    <input type="text" id="tx_byte_1" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 2</label>
+                    <input type="text" id="tx_byte_2" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 3</label>
+                    <input type="text" id="tx_byte_3" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 4</label>
+                    <input type="text" id="tx_byte_4" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 5</label>
+                    <input type="text" id="tx_byte_5" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 6</label>
+                    <input type="text" id="tx_byte_6" class="byte-input" placeholder="00" />
+                </div>
+                <div class="transmit-field" style="margin: 0;">
+                    <label style="font-weight: normal; font-size: 0.8em;">Byte 7</label>
+                    <input type="text" id="tx_byte_7" class="byte-input" placeholder="00" />
                 </div>
             </div>
-            <button onclick="transmitMessage()">Transmit</button>
         </div>
+        <button onclick="transmitMessage()" style="margin-top: 12px;">Transmit</button>
         <div id="transmit_status" class="status-message"></div>
     </div>
 </body>
