@@ -5,7 +5,7 @@
 
 namespace
 {
-    constexpr uint32_t FILTERED_MESSAGE_TIMEOUT_MS = 10'000;
+    constexpr uint32_t FILTERED_MESSAGE_TIMEOUT_MS = 10000;
 
     struct TrackedChange
     {
