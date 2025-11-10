@@ -1,25 +1,109 @@
 #include "web_interface.h"
+#include <Arduino.h>
+#include <algorithm>
+#include <array>
 #include <set>
 #include <stdlib.h>
 #include <cstring>
+#include <vector>
+#include <unordered_map>
 
 namespace
 {
-    constexpr uint32_t FILTERED_MESSAGE_TIMEOUT_MS = 10000;
+    constexpr uint32_t CHANGE_EXPIRATION_MS = 10'000;
 
-    struct TrackedChange
+    struct ChangeRecord
     {
-        uint32_t lastChangeTimestamp = 0;
-        uint8_t length = 0;
-        uint8_t data[8] = {};
-        bool initialized = false;
+        uint32_t timestamp = 0;
+        uint8_t byteIndex = 0;
+        uint8_t oldValue = 0;
+        uint8_t newValue = 0;
     };
 
-    std::map<uint32_t, TrackedChange> s_filteredChangeTracker;
+    std::unordered_map<uint32_t, std::vector<ChangeRecord>> s_changeHistory;
+
+    void pruneHistoryForId(uint32_t id, uint32_t now)
+    {
+        auto it = s_changeHistory.find(id);
+        if (it == s_changeHistory.end())
+        {
+            return;
+        }
+
+        auto &history = it->second;
+        history.erase(std::remove_if(history.begin(), history.end(), [now](const ChangeRecord &record)
+        {
+            return now - record.timestamp > CHANGE_EXPIRATION_MS;
+        }), history.end());
+
+        if (history.empty())
+        {
+            s_changeHistory.erase(it);
+        }
+    }
+
+    void pruneAllHistory(uint32_t now)
+    {
+        for (auto it = s_changeHistory.begin(); it != s_changeHistory.end(); )
+        {
+            auto &history = it->second;
+            history.erase(std::remove_if(history.begin(), history.end(), [now](const ChangeRecord &record)
+            {
+                return now - record.timestamp > CHANGE_EXPIRATION_MS;
+            }), history.end());
+
+            if (history.empty())
+            {
+                it = s_changeHistory.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    std::array<bool, 8> collectHighlightMask(uint32_t id, uint32_t now, uint32_t &lastChangeTimestamp)
+    {
+        std::array<bool, 8> mask{};
+        mask.fill(false);
+        lastChangeTimestamp = 0;
+
+        auto it = s_changeHistory.find(id);
+        if (it == s_changeHistory.end())
+        {
+            return mask;
+        }
+
+        auto &history = it->second;
+        history.erase(std::remove_if(history.begin(), history.end(), [now](const ChangeRecord &record)
+        {
+            return now - record.timestamp > CHANGE_EXPIRATION_MS;
+        }), history.end());
+
+        if (history.empty())
+        {
+            s_changeHistory.erase(it);
+            return mask;
+        }
+
+        for (const auto &record : history)
+        {
+            if (record.byteIndex < mask.size())
+            {
+                mask[record.byteIndex] = true;
+            }
+            if (record.timestamp > lastChangeTimestamp)
+            {
+                lastChangeTimestamp = record.timestamp;
+            }
+        }
+
+        return mask;
+    }
 }
 
 AsyncWebServer WebInterface::server(80);
-const std::map<uint32_t, CANMessage>* WebInterface::recentMessages = nullptr;
 const std::map<uint32_t, CANMessage>* WebInterface::latestMessages = nullptr;
 const std::map<uint32_t, CANMessage>* WebInterface::previousMessages = nullptr;
 
@@ -42,7 +126,6 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         .age-fresh { color: green; }
         .age-medium { color: orange; }
         .age-old { color: red; }
-        /* small smoothing to avoid jank when replacing tbody */
         tbody { transition: opacity 120ms ease-in-out; }
     </style>
     <style>
@@ -50,23 +133,21 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         .nav-link:hover { text-decoration: underline; }
     </style>
     <script>
-        // Poll endpoints for table fragments and replace tbody contents
-        const POLL_MS = 600; // refresh interval; adjust for smoothness
+        const POLL_MS = 600; // refresh interval for the latest table
 
-        async function fetchAndUpdate(path, elementId)
+        async function updateLatest()
         {
             try
             {
-                const res = await fetch(path, {cache: 'no-store'});
+                const res = await fetch('/latest_messages', {cache: 'no-store'});
                 if (!res.ok)
                 {
-                    console.error('Fetch failed', path, res.status);
+                    console.error('Fetch failed', '/latest_messages', res.status);
                     return;
                 }
                 const text = await res.text();
-                const el = document.getElementById(elementId);
+                const el = document.getElementById('latest_body');
                 if (!el) return;
-                // Small fade to reduce visual jump
                 el.style.opacity = 0.2;
                 requestAnimationFrame(() => {
                     el.innerHTML = text;
@@ -75,44 +156,21 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
             }
             catch (e)
             {
-                console.error('Error fetching', path, e);
+                console.error('Error fetching latest messages', e);
             }
         }
 
         function startPolling()
         {
-            // Initial load
-            fetchAndUpdate('/recent_messages', 'recent_body');
-            fetchAndUpdate('/latest_messages', 'latest_body');
-            // Polling
-            setInterval(() => {
-                fetchAndUpdate('/recent_messages', 'recent_body');
-                fetchAndUpdate('/latest_messages', 'latest_body');
-            }, POLL_MS);
+            updateLatest();
+            setInterval(updateLatest, POLL_MS);
         }
 
         window.addEventListener('load', startPolling);
     </script>
 </head>
 <body>
-    <a class="nav-link" href="/filtered">Open filtered recent view</a>
-    <h2>Recent Messages</h2>
-    <div class="section">
-        <table>
-            <thead>
-                <tr>
-                    <th>Time (ms)</th>
-                    <th>ID</th>
-                    <th>Length</th>
-                    <th>Data</th>
-                </tr>
-            </thead>
-            <tbody id="recent_body">
-                %RECENT_MESSAGES%
-            </tbody>
-        </table>
-    </div>
-    
+    <a class="nav-link" href="/filtered">Open filtered change view</a>
     <h2>Latest State</h2>
     <div class="section">
         <table>
@@ -332,12 +390,6 @@ bool WebInterface::initialize(const char* ssid, const char* password)
         request->send(200, "text/html", generateHtml());
     });
 
-    // Endpoints that return only the table body HTML for smooth updates
-    server.on("/recent_messages", HTTP_GET, [](AsyncWebServerRequest *request)
-    {
-        request->send(200, "text/html", generateRecentRows());
-    });
-
     server.on("/latest_messages", HTTP_GET, [](AsyncWebServerRequest *request)
     {
         request->send(200, "text/html", generateLatestRows());
@@ -367,13 +419,42 @@ bool WebInterface::initialize(const char* ssid, const char* password)
 }
 
 void WebInterface::setMessageMaps(
-    const std::map<uint32_t, CANMessage>* recent,
     const std::map<uint32_t, CANMessage>* latest,
     const std::map<uint32_t, CANMessage>* previous)
 {
-    recentMessages = recent;
     latestMessages = latest;
     previousMessages = previous;
+}
+
+void WebInterface::recordChange(const CANMessage& current, const CANMessage* previous)
+{
+    uint32_t now = millis();
+    pruneHistoryForId(current.id, now);
+
+    std::vector<ChangeRecord> newRecords;
+    newRecords.reserve(current.length);
+
+    bool lengthChanged = !previous || previous->length != current.length;
+
+    for (uint8_t i = 0; i < current.length; ++i)
+    {
+        bool valueChanged = !previous || i >= previous->length || current.data[i] != previous->data[i];
+        if (lengthChanged || valueChanged)
+        {
+            ChangeRecord record;
+            record.timestamp = now;
+            record.byteIndex = i;
+            record.newValue = current.data[i];
+            record.oldValue = (previous && i < previous->length) ? previous->data[i] : current.data[i];
+            newRecords.push_back(record);
+        }
+    }
+
+    if (!newRecords.empty())
+    {
+        auto &history = s_changeHistory[current.id];
+        history.insert(history.end(), newRecords.begin(), newRecords.end());
+    }
 }
 
 String WebInterface::formatByte(uint8_t byte, bool highlight)
@@ -395,66 +476,53 @@ String WebInterface::formatByte(uint8_t byte, bool highlight)
 
 String WebInterface::generateHtml()
 {
-    if (!recentMessages || !latestMessages || !previousMessages)
+    if (!latestMessages)
     {
         return "Error: Message maps not initialized";
     }
 
     String html = HTML_TEMPLATE;
-    html.replace("%RECENT_MESSAGES%", generateRecentRows());
     html.replace("%LATEST_MESSAGES%", generateLatestRows());
     return html;
 }
 
-String WebInterface::generateRecentRows()
-{
-    if (!recentMessages)
-    {
-        return "";
-    }
-    String recentRows;
-    for (auto it = recentMessages->rbegin(); it != recentMessages->rend(); ++it)
-    {
-        const CANMessage &m = it->second;
-        recentRows += "<tr><td>" + String(m.timestamp) +
-                      "</td><td>0x" + String(m.id, HEX) +
-                      "</td><td>" + String(m.length) +
-                      "</td><td>";
-
-        // Format each byte individually
-        for (int i = 0; i < m.length; i++)
-        {
-            recentRows += formatByte(m.data[i], false);
-        }
-        recentRows += "</td></tr>\n";
-    }
-    return recentRows;
-}
-
 String WebInterface::generateLatestRows()
 {
-    if (!latestMessages || !previousMessages)
+    if (!latestMessages)
     {
         return "";
     }
 
+    uint32_t currentTime = millis();
     String latestRows;
     for (const auto& pair : *latestMessages)
     {
+        uint32_t lastChangeTimestamp = 0;
+        auto highlightMask = collectHighlightMask(pair.first, currentTime, lastChangeTimestamp);
+
+        bool hasPrev = false;
+        std::map<uint32_t, CANMessage>::const_iterator prevIt;
+        if (previousMessages)
+        {
+            prevIt = previousMessages->find(pair.first);
+            hasPrev = prevIt != previousMessages->end();
+        }
+
         String row = "<tr><td>0x" + String(pair.first, HEX) + "</td>";
         row += "<td>" + String(pair.second.length) + "</td><td>";
 
-        // Compare with previous message byte by byte
-        auto prevIt = previousMessages->find(pair.first);
         for (int i = 0; i < pair.second.length; i++)
         {
-            bool byteChanged = prevIt == previousMessages->end() ||
-                               i >= prevIt->second.length ||
-                               pair.second.data[i] != prevIt->second.data[i];
+            bool highlight = (i < static_cast<int>(highlightMask.size())) ? highlightMask[i] : false;
+            if (!highlight && previousMessages && hasPrev)
+            {
+                highlight = i >= prevIt->second.length ||
+                            pair.second.data[i] != prevIt->second.data[i];
+            }
 
-            row += formatByte(pair.second.data[i], byteChanged);
+            row += formatByte(pair.second.data[i], highlight);
         }
-        uint32_t currentTime = millis();
+
         uint32_t age = currentTime - pair.second.timestamp;
         String ageClass;
         if (age < 1000) ageClass = "age-fresh";          // Less than 1 second
@@ -481,18 +549,31 @@ String WebInterface::generateIdListJson()
         return "[]";
     }
 
-    String json = "[";
-    bool first = true;
-    for (const auto& pair : *latestMessages)
+    uint32_t now = millis();
+    pruneAllHistory(now);
+
+    std::vector<uint32_t> ids;
+    ids.reserve(s_changeHistory.size());
+    for (const auto& entry : s_changeHistory)
     {
-        if (!first)
+        if (latestMessages->find(entry.first) != latestMessages->end())
+        {
+            ids.push_back(entry.first);
+        }
+    }
+
+    std::sort(ids.begin(), ids.end());
+
+    String json = "[";
+    for (size_t i = 0; i < ids.size(); ++i)
+    {
+        if (i != 0)
         {
             json += ",";
         }
         json += "\"0x";
-        json += String(pair.first, HEX);
+        json += String(ids[i], HEX);
         json += "\"";
-        first = false;
     }
     json += "]";
     return json;
@@ -537,7 +618,7 @@ std::vector<uint32_t> WebInterface::parseIdList(const String& rawIds)
 
 String WebInterface::generateFilteredRows(const std::vector<uint32_t>& ids)
 {
-    if (!latestMessages || !previousMessages)
+    if (!latestMessages)
     {
         return "<tr><td colspan='5'>Waiting for CAN data...</td></tr>";
     }
@@ -558,37 +639,39 @@ String WebInterface::generateFilteredRows(const std::vector<uint32_t>& ids)
             continue;
         }
 
-        auto& tracker = s_filteredChangeTracker[pair.first];
-        bool dataChanged = !tracker.initialized ||
-                           tracker.length != pair.second.length ||
-                           memcmp(tracker.data, pair.second.data, pair.second.length) != 0;
-
-        if (dataChanged)
-        {
-            tracker.length = pair.second.length;
-            memcpy(tracker.data, pair.second.data, pair.second.length);
-            tracker.lastChangeTimestamp = pair.second.timestamp;
-            tracker.initialized = true;
-        }
-
-        uint32_t lastChangeTimestamp = tracker.initialized ? tracker.lastChangeTimestamp : pair.second.timestamp;
-        uint32_t age = currentTime - lastChangeTimestamp;
-
-        if (age > FILTERED_MESSAGE_TIMEOUT_MS)
+        uint32_t lastChangeTimestamp = 0;
+        auto highlightMask = collectHighlightMask(pair.first, currentTime, lastChangeTimestamp);
+        if (lastChangeTimestamp == 0)
         {
             continue;
+        }
+
+        uint32_t age = currentTime - lastChangeTimestamp;
+        if (age > CHANGE_EXPIRATION_MS)
+        {
+            continue;
+        }
+
+        bool hasPrev = false;
+        std::map<uint32_t, CANMessage>::const_iterator prevIt;
+        if (previousMessages)
+        {
+            prevIt = previousMessages->find(pair.first);
+            hasPrev = prevIt != previousMessages->end();
         }
 
         rows += "<tr><td>0x" + String(pair.first, HEX) + "</td>";
         rows += "<td>" + String(pair.second.length) + "</td><td>";
 
-        auto prevIt = previousMessages->find(pair.first);
         for (int i = 0; i < pair.second.length; i++)
         {
-            bool byteChanged = prevIt == previousMessages->end() ||
-                               i >= prevIt->second.length ||
-                               pair.second.data[i] != prevIt->second.data[i];
-            rows += formatByte(pair.second.data[i], byteChanged);
+            bool highlight = (i < static_cast<int>(highlightMask.size())) ? highlightMask[i] : false;
+            if (!highlight && previousMessages && hasPrev)
+            {
+                highlight = i >= prevIt->second.length ||
+                            pair.second.data[i] != prevIt->second.data[i];
+            }
+            rows += formatByte(pair.second.data[i], highlight);
         }
 
         String ageClass;
