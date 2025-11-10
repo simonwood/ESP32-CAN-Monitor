@@ -31,7 +31,6 @@ const twai_general_config_t g_config =
 AsyncWebServer server(80);
 
 // Message storage
-std::map<uint32_t, CANMessage> recentMessages;  // Latest message per CAN ID
 std::map<uint32_t, CANMessage> latestMessages;  // Latest state per CAN ID
 std::map<uint32_t, CANMessage> previousMessages;  // Previous state per CAN ID
 bool transmitCanMessage(uint32_t nId, uint8_t nBytes, const uint8_t* pData)
@@ -103,7 +102,7 @@ void setup()
         Serial.println("Web interface initialization failed!");
         while (1);
     }
-    WebInterface::setMessageMaps(&recentMessages, &latestMessages, &previousMessages);
+    WebInterface::setMessageMaps(&latestMessages, &previousMessages);
 #endif
 
     // Install TWAI driver
@@ -146,15 +145,21 @@ void CanRX()
 
         IndicateMessage(msg);
 
-        // Store the latest message per ID (one entry per CAN ID)
-        recentMessages[msg.id] = msg;
-
         // Update latest/previous messages maps
-        if (latestMessages.find(msg.id) != latestMessages.end())
+        const CANMessage* previousMessage = nullptr;
+        auto latestIt = latestMessages.find(msg.id);
+        if (latestIt != latestMessages.end())
         {
             // Move current to previous
-            previousMessages[msg.id] = latestMessages[msg.id];
+            previousMessages[msg.id] = latestIt->second;
+            previousMessage = &latestIt->second;
         }
+        else
+        {
+            previousMessages.erase(msg.id);
+        }
+
+        WebInterface::recordChange(msg, previousMessage);
         latestMessages[msg.id] = msg;
 
         // Debug output to serial
