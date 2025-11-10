@@ -106,6 +106,7 @@ namespace
 AsyncWebServer WebInterface::server(80);
 const std::map<uint32_t, CANMessage>* WebInterface::latestMessages = nullptr;
 const std::map<uint32_t, CANMessage>* WebInterface::previousMessages = nullptr;
+bool (*WebInterface::transmitCallback)(uint32_t id, uint8_t length, const uint8_t* data) = nullptr;
 
 // HTML template moved from main.cpp
 // Note: the page loads once and client-side JavaScript fetches table fragments
@@ -127,10 +128,21 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         .age-medium { color: orange; }
         .age-old { color: red; }
         tbody { transition: opacity 120ms ease-in-out; }
-    </style>
-    <style>
-        .nav-link { margin-bottom: 16px; display: inline-block; color: #1976d2; text-decoration: none; }
-        .nav-link:hover { text-decoration: underline; }
+        tbody tr { cursor: pointer; }
+        tbody tr:hover { background-color: #f0f0f0; }
+        .transmit-section { border: 1px solid #ddd; padding: 16px; border-radius: 4px; margin-top: 20px; }
+        .transmit-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+        .transmit-field { display: flex; flex-direction: column; }
+        .transmit-field label { font-weight: bold; margin-bottom: 4px; font-size: 0.9em; }
+        .transmit-field input { padding: 6px; border: 1px solid #ccc; border-radius: 3px; font-family: monospace; }
+        .transmit-field input[type="number"] { width: 80px; }
+        .transmit-field input[type="text"] { width: 150px; }
+        .byte-input { width: 50px; }
+        button { padding: 8px 16px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 3px; }
+        button:hover { background-color: #45a049; }
+        .status-message { margin-top: 8px; padding: 8px; border-radius: 3px; display: none; }
+        .status-message.success { background-color: #d4edda; color: #155724; }
+        .status-message.error { background-color: #f8d7da; color: #721c24; }
     </style>
     <script>
         const POLL_MS = 600; // refresh interval for the latest table
@@ -152,6 +164,8 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
                 requestAnimationFrame(() => {
                     el.innerHTML = text;
                     el.style.opacity = 1.0;
+                    // Re-attach row click handlers after table update
+                    attachRowClickHandlers();
                 });
             }
             catch (e)
@@ -160,10 +174,128 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
             }
         }
 
+        function attachRowClickHandlers()
+        {
+            const rows = document.querySelectorAll('#latest_body tr');
+            rows.forEach(row => {
+                row.addEventListener('click', () => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 3) {
+                        const idCell = cells[0].textContent.trim(); // "0x..."
+                        const lengthCell = parseInt(cells[1].textContent.trim());
+                        const dataCell = cells[2].textContent.trim(); // "01 02 03 ..."
+                        
+                        // Parse ID (remove 0x)
+                        const id = idCell.startsWith('0x') ? idCell.substring(2) : idCell;
+                        
+                        // Parse data bytes
+                        const byteStrings = dataCell.split(/\s+/).filter(b => b.length > 0);
+                        
+                        // Populate transmit form
+                        document.getElementById('tx_id').value = id;
+                        document.getElementById('tx_length').value = lengthCell;
+                        
+                        // Clear all byte inputs first
+                        for (let i = 0; i < 8; i++) {
+                            document.getElementById('tx_byte_' + i).value = '';
+                        }
+                        
+                        // Fill in the bytes
+                        byteStrings.forEach((byte, index) => {
+                            if (index < 8) {
+                                document.getElementById('tx_byte_' + index).value = byte;
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
+        function updateByteInputs()
+        {
+            const length = parseInt(document.getElementById('tx_length').value) || 0;
+            const constrainedLength = Math.min(Math.max(length, 0), 8);
+            document.getElementById('tx_length').value = constrainedLength;
+            
+            for (let i = 0; i < 8; i++) {
+                const input = document.getElementById('tx_byte_' + i);
+                if (i < constrainedLength) {
+                    input.style.display = 'inline-block';
+                } else {
+                    input.style.display = 'none';
+                    input.value = '';
+                }
+            }
+        }
+
+        async function transmitMessage()
+        {
+            const id = document.getElementById('tx_id').value.trim();
+            const length = parseInt(document.getElementById('tx_length').value) || 0;
+            const statusEl = document.getElementById('transmit_status');
+            
+            if (!id) {
+                statusEl.textContent = 'Error: ID is required';
+                statusEl.className = 'status-message error';
+                statusEl.style.display = 'block';
+                return;
+            }
+            
+            if (length < 0 || length > 8) {
+                statusEl.textContent = 'Error: Length must be 0-8';
+                statusEl.className = 'status-message error';
+                statusEl.style.display = 'block';
+                return;
+            }
+            
+            const data = [];
+            for (let i = 0; i < length; i++) {
+                const byteVal = document.getElementById('tx_byte_' + i).value.trim();
+                if (!byteVal) {
+                    statusEl.textContent = 'Error: Byte ' + i + ' is required';
+                    statusEl.className = 'status-message error';
+                    statusEl.style.display = 'block';
+                    return;
+                }
+                const parsed = parseInt(byteVal, 16);
+                if (isNaN(parsed) || parsed < 0 || parsed > 255) {
+                    statusEl.textContent = 'Error: Byte ' + i + ' must be valid hex (0-FF)';
+                    statusEl.className = 'status-message error';
+                    statusEl.style.display = 'block';
+                    return;
+                }
+                data.push(parsed);
+            }
+            
+            try {
+                const res = await fetch('/transmit_message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: id, length: length, data: data })
+                });
+                
+                if (res.ok) {
+                    statusEl.textContent = 'Message transmitted: ID=0x' + id + ', Length=' + length;
+                    statusEl.className = 'status-message success';
+                    statusEl.style.display = 'block';
+                } else {
+                    statusEl.textContent = 'Error: Transmit failed (HTTP ' + res.status + ')';
+                    statusEl.className = 'status-message error';
+                    statusEl.style.display = 'block';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error: ' + e.message;
+                statusEl.className = 'status-message error';
+                statusEl.style.display = 'block';
+            }
+        }
+
         function startPolling()
         {
             updateLatest();
             setInterval(updateLatest, POLL_MS);
+            // Initialize byte input display
+            updateByteInputs();
         }
 
         window.addEventListener('load', startPolling);
@@ -187,6 +319,38 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
                 %LATEST_MESSAGES%
             </tbody>
         </table>
+    </div>
+
+    <div class="transmit-section">
+        <h2>Transmit Message</h2>
+        <p style="font-size: 0.9em; color: #666; margin: 0 0 12px 0;">Click a row above to copy its data, or enter values manually</p>
+        <div class="transmit-row">
+            <div class="transmit-field">
+                <label for="tx_id">ID (hex)</label>
+                <input type="text" id="tx_id" placeholder="123" />
+            </div>
+            <div class="transmit-field">
+                <label for="tx_length">Length</label>
+                <input type="number" id="tx_length" min="0" max="8" value="0" onchange="updateByteInputs()" />
+            </div>
+            <div id="tx_bytes_container" style="display: flex; gap: 6px; align-items: flex-end;">
+                <div class="transmit-field">
+                    <label>Data (hex)</label>
+                    <div style="display: flex; gap: 4px;">
+                        <input type="text" id="tx_byte_0" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_1" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_2" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_3" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_4" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_5" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_6" class="byte-input" placeholder="00" />
+                        <input type="text" id="tx_byte_7" class="byte-input" placeholder="00" />
+                    </div>
+                </div>
+            </div>
+            <button onclick="transmitMessage()">Transmit</button>
+        </div>
+        <div id="transmit_status" class="status-message"></div>
     </div>
 </body>
 </html>
@@ -362,6 +526,7 @@ const char* WebInterface::FILTERED_TEMPLATE = R"html(
 bool WebInterface::initialize(const char* ssid, const char* password)
 {
     // Connect to WiFi
+    WiFi.setHostname("RCLS-CAN");
     WiFi.begin(ssid, password);
     uint8_t retries = 0;
     while (WiFi.status() != WL_CONNECTED && retries < 20)
@@ -412,6 +577,78 @@ bool WebInterface::initialize(const char* ssid, const char* password)
         auto ids = parseIdList(rawIds);
         request->send(200, "text/html", generateFilteredRows(ids));
     });
+    server.on("/transmit_message", HTTP_POST, [](AsyncWebServerRequest *request)
+    {
+        if (request->hasParam("body", true))
+        {
+            // This will be handled in onBody
+        }
+        request->send(400, "application/json", "{\"error\":\"Invalid request\"}");
+    }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+    {
+        // onBody handler for JSON parsing
+        static String jsonBody;
+        
+        // Accumulate body data
+        jsonBody = String((char *)data);
+        
+        // Simple JSON parsing (since we don't have a JSON library readily available)
+        // Expected format: {"id":"123","length":2,"data":[0x12,0x34]}
+        // Extract id
+        int idStart = jsonBody.indexOf("\"id\":\"") + 6;
+        int idEnd = jsonBody.indexOf("\"", idStart);
+        String idStr = jsonBody.substring(idStart, idEnd);
+        
+        // Extract length
+        int lenStart = jsonBody.indexOf("\"length\":") + 9;
+        int lenEnd = jsonBody.indexOf(",", lenStart);
+        if (lenEnd == -1) lenEnd = jsonBody.indexOf("}", lenStart);
+        String lenStr = jsonBody.substring(lenStart, lenEnd);
+        
+        // Extract data array
+        int dataStart = jsonBody.indexOf("\"data\":[") + 8;
+        int dataEnd = jsonBody.indexOf("]", dataStart);
+        String dataStr = jsonBody.substring(dataStart, dataEnd);
+        
+        // Parse ID
+        uint32_t id = strtoul(idStr.c_str(), nullptr, 16);
+        uint8_t length = atoi(lenStr.c_str());
+        
+        // Parse data bytes
+        uint8_t dataBytes[8];
+        int byteCount = 0;
+        int pos = 0;
+        while (pos < dataStr.length() && byteCount < 8)
+        {
+            int commaPos = dataStr.indexOf(',', pos);
+            if (commaPos == -1) commaPos = dataStr.length();
+            
+            String byteStr = dataStr.substring(pos, commaPos);
+            byteStr.trim();
+            dataBytes[byteCount] = strtoul(byteStr.c_str(), nullptr, 0);
+            byteCount++;
+            pos = commaPos + 1;
+        }
+        
+        // Call transmit callback if set
+        if (transmitCallback && byteCount >= length)
+        {
+            if (transmitCallback(id, length, dataBytes))
+            {
+                request->send(200, "application/json", "{\"status\":\"transmitted\"}");
+            }
+            else
+            {
+                request->send(500, "application/json", "{\"error\":\"Transmit failed\"}");
+            }
+        }
+        else
+        {
+            request->send(400, "application/json", "{\"error\":\"Invalid parameters\"}");
+        }
+        
+        jsonBody = "";
+    });
 
     server.begin();
     Serial.println("Web server started");
@@ -424,6 +661,11 @@ void WebInterface::setMessageMaps(
 {
     latestMessages = latest;
     previousMessages = previous;
+}
+
+void WebInterface::setTransmitCallback(bool (*callback)(uint32_t id, uint8_t length, const uint8_t* data))
+{
+    transmitCallback = callback;
 }
 
 void WebInterface::recordChange(const CANMessage& current, const CANMessage* previous)

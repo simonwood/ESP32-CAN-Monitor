@@ -103,6 +103,7 @@ void setup()
         while (1);
     }
     WebInterface::setMessageMaps(&latestMessages, &previousMessages);
+    WebInterface::setTransmitCallback(transmitCanMessage);
 #endif
 
     // Install TWAI driver

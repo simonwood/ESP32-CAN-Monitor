@@ -15,11 +15,13 @@ public:
         const std::map<uint32_t, CANMessage>* latest,
         const std::map<uint32_t, CANMessage>* previous);
     static void recordChange(const CANMessage& current, const CANMessage* previous);
+    static void setTransmitCallback(bool (*callback)(uint32_t id, uint8_t length, const uint8_t* data));
 
 private:
     static AsyncWebServer server;
     static const std::map<uint32_t, CANMessage>* latestMessages;
     static const std::map<uint32_t, CANMessage>* previousMessages;
+    static bool (*transmitCallback)(uint32_t id, uint8_t length, const uint8_t* data);
 
     static String formatByte(uint8_t byte, bool highlight);
     static String generateHtml();
