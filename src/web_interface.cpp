@@ -118,31 +118,51 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
     <title>CAN Bus Monitor</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .highlight { background-color: #ffeb3b; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; margin: 0; background-color: #fafafa; color: #333; }
+        h2 { margin: 20px 0 16px 0; color: #1a1a1a; }
+        p { margin: 0 0 12px 0; }
+        
+        /* Navigation */
+        .nav-link { display: inline-block; color: #1976d2; text-decoration: none; margin-bottom: 16px; }
+        .nav-link:hover { text-decoration: underline; }
+        
+        /* Sections */
         .section { margin: 20px 0; }
-        .byte { display: inline-block; min-width: 25px; }
-        .age-fresh { color: green; }
-        .age-medium { color: orange; }
-        .age-old { color: red; }
+        
+        /* Tables */
+        table { border-collapse: collapse; width: 100%; background-color: white; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f5f5f5; font-weight: 600; }
         tbody { transition: opacity 120ms ease-in-out; }
         tbody tr { cursor: pointer; }
-        tbody tr:hover { background-color: #f0f0f0; }
-        .transmit-section { border: 1px solid #ddd; padding: 16px; border-radius: 4px; margin-top: 20px; }
-        .transmit-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+        tbody tr:hover { background-color: #f9f9f9; }
+        
+        /* Data highlighting */
+        .highlight { background-color: #ffeb3b; }
+        .byte { display: inline-block; min-width: 25px; font-family: monospace; }
+        .age-fresh { color: #4caf50; font-weight: 500; }
+        .age-medium { color: #ff9800; font-weight: 500; }
+        .age-old { color: #f44336; font-weight: 500; }
+        
+        /* Forms */
+        .transmit-section { background-color: white; border: 1px solid #ddd; padding: 20px; border-radius: 4px; margin-top: 20px; }
         .transmit-field { display: flex; flex-direction: column; }
-        .transmit-field label { font-weight: bold; margin-bottom: 4px; font-size: 0.9em; }
-        .transmit-field input { padding: 6px; border: 1px solid #ccc; border-radius: 3px; font-family: monospace; }
+        .transmit-field label { font-weight: 600; margin-bottom: 6px; font-size: 0.95em; color: #1a1a1a; }
+        .transmit-field input { padding: 8px; border: 1px solid #ccc; border-radius: 3px; font-family: monospace; font-size: 14px; }
         .transmit-field input[type="number"] { width: 100px; }
         .transmit-field input[type="text"] { width: 150px; }
-        .byte-input { width: 60px !important; text-align: center; text-transform: uppercase; }
-        button { padding: 8px 16px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 3px; }
+        .byte-input { width: 60px !important; text-align: center; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* Buttons */
+        button { padding: 10px 16px; cursor: pointer; background-color: #4caf50; color: white; border: none; border-radius: 3px; font-weight: 600; font-size: 14px; transition: background-color 200ms; }
         button:hover { background-color: #45a049; }
-        .status-message { margin-top: 8px; padding: 8px; border-radius: 3px; display: none; }
-        .status-message.success { background-color: #d4edda; color: #155724; }
-        .status-message.error { background-color: #f8d7da; color: #721c24; }
+        button:active { transform: scale(0.98); }
+        
+        /* Status messages */
+        .status-message { margin-top: 12px; padding: 12px; border-radius: 3px; display: none; border-left: 4px solid; }
+        .status-message.success { background-color: #d4edda; color: #155724; border-left-color: #28a745; }
+        .status-message.error { background-color: #f8d7da; color: #721c24; border-left-color: #dc3545; }
     </style>
     <script>
         const POLL_MS = 600; // refresh interval for the latest table
@@ -329,8 +349,8 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
 
     <div class="transmit-section">
         <h2>Transmit Message</h2>
-        <p style="font-size: 0.9em; color: #666; margin: 0 0 12px 0;">Click a row above to copy its data, or enter values manually</p>
-        <div style="display: flex; gap: 24px; margin-bottom: 12px;">
+        <p style="font-size: 0.95em; color: #666;">Click a row above to copy its data, or enter values manually</p>
+        <div style="display: flex; gap: 24px; margin-bottom: 20px; flex-wrap: wrap;">
             <div class="transmit-field">
                 <label for="tx_id">ID (hex)</label>
                 <input type="text" id="tx_id" placeholder="123" />
@@ -340,44 +360,44 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
                 <input type="number" id="tx_length" min="0" max="8" value="1" onchange="updateByteInputs()" />
             </div>
         </div>
-        <div style="margin-bottom: 12px;">
-            <label style="font-weight: bold; display: block; margin-bottom: 8px;">Data (hex bytes)</label>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <div style="margin-bottom: 16px;">
+            <label style="font-weight: 600; display: block; margin-bottom: 12px; color: #1a1a1a;">Data (hex bytes)</label>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 0</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 0</label>
                     <input type="text" id="tx_byte_0" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 1</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 1</label>
                     <input type="text" id="tx_byte_1" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 2</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 2</label>
                     <input type="text" id="tx_byte_2" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 3</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 3</label>
                     <input type="text" id="tx_byte_3" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 4</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 4</label>
                     <input type="text" id="tx_byte_4" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 5</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 5</label>
                     <input type="text" id="tx_byte_5" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 6</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 6</label>
                     <input type="text" id="tx_byte_6" class="byte-input" placeholder="00" />
                 </div>
                 <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.8em;">Byte 7</label>
+                    <label style="font-weight: normal; font-size: 0.85em;">Byte 7</label>
                     <input type="text" id="tx_byte_7" class="byte-input" placeholder="00" />
                 </div>
             </div>
         </div>
-        <button onclick="transmitMessage()" style="margin-top: 12px;">Transmit</button>
+        <button onclick="transmitMessage()">Transmit</button>
         <div id="transmit_status" class="status-message"></div>
     </div>
 </body>
@@ -391,23 +411,39 @@ const char* WebInterface::FILTERED_TEMPLATE = R"html(
     <title>Filtered CAN Messages</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>
-        body { font-family: Arial, sans-serif; padding: 16px; }
-        h2 { margin-top: 0; }
-        .filters { margin-bottom: 16px; }
-        .id-option { display: inline-flex; align-items: center; margin: 4px 12px 4px 0; }
-        .id-option input { margin-right: 6px; }
-        .filter-actions { margin-bottom: 12px; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .highlight { background-color: #ffeb3b; }
-        .byte { display: inline-block; min-width: 25px; }
-        .age-fresh { color: green; }
-        .age-medium { color: orange; }
-        .age-old { color: red; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; margin: 0; background-color: #fafafa; color: #333; }
+        h2 { margin: 0 0 16px 0; color: #1a1a1a; }
+        p { margin: 12px 0; }
+        a { color: #1976d2; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        
+        /* Filters section */
+        .filters { background-color: white; border: 1px solid #ddd; padding: 16px; border-radius: 4px; margin-bottom: 20px; }
+        .filter-actions { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .status { font-size: 0.95em; color: #666; }
+        #id_list { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+        .id-option { display: flex; align-items: center; gap: 6px; }
+        .id-option input { cursor: pointer; }
+        .id-option span { cursor: pointer; user-select: none; }
+        
+        /* Tables */
+        table { border-collapse: collapse; width: 100%; background-color: white; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f5f5f5; font-weight: 600; }
         #filtered_body { transition: opacity 120ms ease-in-out; }
-        button { cursor: pointer; }
-        .status { font-size: 0.9em; color: #666; margin-top: 8px; }
+        
+        /* Data highlighting */
+        .highlight { background-color: #ffeb3b; }
+        .byte { display: inline-block; min-width: 25px; font-family: monospace; }
+        .age-fresh { color: #4caf50; font-weight: 500; }
+        .age-medium { color: #ff9800; font-weight: 500; }
+        .age-old { color: #f44336; font-weight: 500; }
+        
+        /* Buttons */
+        button { padding: 10px 16px; cursor: pointer; background-color: #4caf50; color: white; border: none; border-radius: 3px; font-weight: 600; font-size: 14px; transition: background-color 200ms; }
+        button:hover { background-color: #45a049; }
+        button:active { transform: scale(0.98); }
     </style>
     <script>
         const GRID_POLL_MS = 600;
