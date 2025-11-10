@@ -1,6 +1,22 @@
 #include "web_interface.h"
 #include <set>
 #include <stdlib.h>
+#include <cstring>
+
+namespace
+{
+    constexpr uint32_t FILTERED_MESSAGE_TIMEOUT_MS = 10'000;
+
+    struct TrackedChange
+    {
+        uint32_t lastChangeTimestamp = 0;
+        uint8_t length = 0;
+        uint8_t data[8] = {};
+        bool initialized = false;
+    };
+
+    std::map<uint32_t, TrackedChange> s_filteredChangeTracker;
+}
 
 AsyncWebServer WebInterface::server(80);
 const std::map<uint32_t, CANMessage>* WebInterface::recentMessages = nullptr;
@@ -542,6 +558,27 @@ String WebInterface::generateFilteredRows(const std::vector<uint32_t>& ids)
             continue;
         }
 
+        auto& tracker = s_filteredChangeTracker[pair.first];
+        bool dataChanged = !tracker.initialized ||
+                           tracker.length != pair.second.length ||
+                           memcmp(tracker.data, pair.second.data, pair.second.length) != 0;
+
+        if (dataChanged)
+        {
+            tracker.length = pair.second.length;
+            memcpy(tracker.data, pair.second.data, pair.second.length);
+            tracker.lastChangeTimestamp = pair.second.timestamp;
+            tracker.initialized = true;
+        }
+
+        uint32_t lastChangeTimestamp = tracker.initialized ? tracker.lastChangeTimestamp : pair.second.timestamp;
+        uint32_t age = currentTime - lastChangeTimestamp;
+
+        if (age > FILTERED_MESSAGE_TIMEOUT_MS)
+        {
+            continue;
+        }
+
         rows += "<tr><td>0x" + String(pair.first, HEX) + "</td>";
         rows += "<td>" + String(pair.second.length) + "</td><td>";
 
@@ -554,7 +591,6 @@ String WebInterface::generateFilteredRows(const std::vector<uint32_t>& ids)
             rows += formatByte(pair.second.data[i], byteChanged);
         }
 
-        uint32_t age = currentTime - pair.second.timestamp;
         String ageClass;
         if (age < 1000) ageClass = "age-fresh";
         else if (age < 5000) ageClass = "age-medium";
@@ -566,7 +602,7 @@ String WebInterface::generateFilteredRows(const std::vector<uint32_t>& ids)
 
     if (!rows.length())
     {
-        rows = "<tr><td colspan='5'>No matching IDs found</td></tr>";
+        rows = "<tr><td colspan='5'>No matching IDs found or messages have expired</td></tr>";
     }
 
     return rows;
