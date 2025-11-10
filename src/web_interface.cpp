@@ -119,13 +119,28 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; margin: 0; background-color: #fafafa; color: #333; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 0; margin: 0; background-color: #fafafa; color: #333; }
+        
+        /* Header and Navigation */
+        header { background-color: #1a1a1a; color: white; padding: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header-content { max-width: 1400px; margin: 0 auto; padding: 16px; }
+        .app-title { font-size: 24px; font-weight: 700; margin: 0; color: white; }
+        nav { background-color: #2d2d2d; }
+        nav ul { list-style: none; margin: 0; padding: 0; display: flex; }
+        nav li { margin: 0; }
+        nav a { display: block; padding: 12px 20px; color: white; text-decoration: none; transition: background-color 200ms; border-bottom: 3px solid transparent; }
+        nav a:hover { background-color: #3d3d3d; }
+        nav a.active { background-color: #4caf50; border-bottom-color: #4caf50; }
+        
+        /* Main content */
+        main { max-width: 1400px; margin: 0 auto; padding: 20px 16px; }
+        .page { display: none; }
+        .page.active { display: block; }
+        
         h2 { margin: 20px 0 16px 0; color: #1a1a1a; }
         p { margin: 0 0 12px 0; }
-        
-        /* Navigation */
-        .nav-link { display: inline-block; color: #1976d2; text-decoration: none; margin-bottom: 16px; }
-        .nav-link:hover { text-decoration: underline; }
+        a { color: #1976d2; text-decoration: none; }
+        a:hover { text-decoration: underline; }
         
         /* Sections */
         .section { margin: 20px 0; }
@@ -163,6 +178,15 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
         .status-message { margin-top: 12px; padding: 12px; border-radius: 3px; display: none; border-left: 4px solid; }
         .status-message.success { background-color: #d4edda; color: #155724; border-left-color: #28a745; }
         .status-message.error { background-color: #f8d7da; color: #721c24; border-left-color: #dc3545; }
+        
+        /* Filters section */
+        .filters { background-color: white; border: 1px solid #ddd; padding: 16px; border-radius: 4px; margin-bottom: 20px; }
+        .filter-actions { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .status { font-size: 0.95em; color: #666; }
+        #id_list { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+        .id-option { display: flex; align-items: center; gap: 6px; }
+        .id-option input { cursor: pointer; }
+        .id-option span { cursor: pointer; user-select: none; }
     </style>
     <script>
         const POLL_MS = 600; // refresh interval for the latest table
@@ -316,6 +340,26 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
             }
         }
 
+        function switchPage(page)
+        {
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            
+            // Show the selected page and update nav
+            if (page === 'home') {
+                document.getElementById('home-page').classList.add('active');
+                document.getElementById('nav-home').classList.add('active');
+            } else if (page === 'filter') {
+                document.getElementById('filter-page').classList.add('active');
+                document.getElementById('nav-filter').classList.add('active');
+                // Initialize filter page if needed
+                if (typeof startFilteredPage === 'function') {
+                    startFilteredPage();
+                }
+            }
+        }
+
         function startPolling()
         {
             updateLatest();
@@ -324,127 +368,126 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
             updateByteInputs();
         }
 
-        window.addEventListener('load', startPolling);
+        window.addEventListener('load', () => {
+            startPolling();
+            // Pre-initialize the filter page data but keep it hidden
+            if (typeof startFilteredPage === 'function') {
+                startFilteredPage();
+            }
+        });
     </script>
 </head>
 <body>
-    <a class="nav-link" href="/filtered">Open filtered change view</a>
-    <h2>Latest State</h2>
-    <div class="section">
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Length</th>
-                    <th>Data</th>
-                    <th>Last Update</th>
-                    <th>Age (ms)</th>
-                </tr>
-            </thead>
-            <tbody id="latest_body">
-                %LATEST_MESSAGES%
-            </tbody>
-        </table>
-    </div>
-
-    <div class="transmit-section">
-        <h2>Transmit Message</h2>
-        <p style="font-size: 0.95em; color: #666;">Click a row above to copy its data, or enter values manually</p>
-        <div style="display: flex; gap: 24px; margin-bottom: 20px; flex-wrap: wrap;">
-            <div class="transmit-field">
-                <label for="tx_id">ID (hex)</label>
-                <input type="text" id="tx_id" placeholder="123" />
+    <header>
+        <div class="header-content">
+            <h1 class="app-title">RCLS CAN Bus Monitor</h1>
+        </div>
+    </header>
+    <nav>
+        <ul>
+            <li><a href="#" onclick="switchPage('home'); return false;" class="nav-link active" id="nav-home">Home</a></li>
+            <li><a href="#" onclick="switchPage('filter'); return false;" class="nav-link" id="nav-filter">Filter</a></li>
+        </ul>
+    </nav>
+    <main>
+        <div id="home-page" class="page active">
+            <h2>Latest State</h2>
+            <div class="section">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Length</th>
+                            <th>Data</th>
+                            <th>Last Update</th>
+                            <th>Age (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="latest_body">
+                        %LATEST_MESSAGES%
+                    </tbody>
+                </table>
             </div>
-            <div class="transmit-field">
-                <label for="tx_length">Length (bytes)</label>
-                <input type="number" id="tx_length" min="0" max="8" value="1" onchange="updateByteInputs()" />
+
+            <div class="transmit-section">
+                <h2>Transmit Message</h2>
+                <p style="font-size: 0.95em; color: #666;">Click a row above to copy its data, or enter values manually</p>
+                <div style="display: flex; gap: 24px; margin-bottom: 20px; flex-wrap: wrap;">
+                    <div class="transmit-field">
+                        <label for="tx_id">ID (hex)</label>
+                        <input type="text" id="tx_id" placeholder="123" />
+                    </div>
+                    <div class="transmit-field">
+                        <label for="tx_length">Length (bytes)</label>
+                        <input type="number" id="tx_length" min="0" max="8" value="1" onchange="updateByteInputs()" />
+                    </div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 12px; color: #1a1a1a;">Data (hex bytes)</label>
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 0</label>
+                            <input type="text" id="tx_byte_0" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 1</label>
+                            <input type="text" id="tx_byte_1" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 2</label>
+                            <input type="text" id="tx_byte_2" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 3</label>
+                            <input type="text" id="tx_byte_3" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 4</label>
+                            <input type="text" id="tx_byte_4" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 5</label>
+                            <input type="text" id="tx_byte_5" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 6</label>
+                            <input type="text" id="tx_byte_6" class="byte-input" placeholder="00" />
+                        </div>
+                        <div class="transmit-field" style="margin: 0;">
+                            <label style="font-weight: normal; font-size: 0.85em;">Byte 7</label>
+                            <input type="text" id="tx_byte_7" class="byte-input" placeholder="00" />
+                        </div>
+                    </div>
+                </div>
+                <button onclick="transmitMessage()">Transmit</button>
+                <div id="transmit_status" class="status-message"></div>
             </div>
         </div>
-        <div style="margin-bottom: 16px;">
-            <label style="font-weight: 600; display: block; margin-bottom: 12px; color: #1a1a1a;">Data (hex bytes)</label>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 0</label>
-                    <input type="text" id="tx_byte_0" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 1</label>
-                    <input type="text" id="tx_byte_1" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 2</label>
-                    <input type="text" id="tx_byte_2" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 3</label>
-                    <input type="text" id="tx_byte_3" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 4</label>
-                    <input type="text" id="tx_byte_4" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 5</label>
-                    <input type="text" id="tx_byte_5" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 6</label>
-                    <input type="text" id="tx_byte_6" class="byte-input" placeholder="00" />
-                </div>
-                <div class="transmit-field" style="margin: 0;">
-                    <label style="font-weight: normal; font-size: 0.85em;">Byte 7</label>
-                    <input type="text" id="tx_byte_7" class="byte-input" placeholder="00" />
-                </div>
-            </div>
-        </div>
-        <button onclick="transmitMessage()">Transmit</button>
-        <div id="transmit_status" class="status-message"></div>
-    </div>
-</body>
-</html>
-)html";
 
-const char* WebInterface::FILTERED_TEMPLATE = R"html(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Filtered CAN Messages</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <style>
-        * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; margin: 0; background-color: #fafafa; color: #333; }
-        h2 { margin: 0 0 16px 0; color: #1a1a1a; }
-        p { margin: 12px 0; }
-        a { color: #1976d2; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        
-        /* Filters section */
-        .filters { background-color: white; border: 1px solid #ddd; padding: 16px; border-radius: 4px; margin-bottom: 20px; }
-        .filter-actions { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-        .status { font-size: 0.95em; color: #666; }
-        #id_list { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
-        .id-option { display: flex; align-items: center; gap: 6px; }
-        .id-option input { cursor: pointer; }
-        .id-option span { cursor: pointer; user-select: none; }
-        
-        /* Tables */
-        table { border-collapse: collapse; width: 100%; background-color: white; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f5f5f5; font-weight: 600; }
-        #filtered_body { transition: opacity 120ms ease-in-out; }
-        
-        /* Data highlighting */
-        .highlight { background-color: #ffeb3b; }
-        .byte { display: inline-block; min-width: 25px; font-family: monospace; }
-        .age-fresh { color: #4caf50; font-weight: 500; }
-        .age-medium { color: #ff9800; font-weight: 500; }
-        .age-old { color: #f44336; font-weight: 500; }
-        
-        /* Buttons */
-        button { padding: 10px 16px; cursor: pointer; background-color: #4caf50; color: white; border: none; border-radius: 3px; font-weight: 600; font-size: 14px; transition: background-color 200ms; }
-        button:hover { background-color: #45a049; }
-        button:active { transform: scale(0.98); }
-    </style>
+        <div id="filter-page" class="page">
+            <h2>Filtered Recent Messages</h2>
+            <div class="filters">
+                <div class="filter-actions">
+                    <button onclick="setAll(true)">Select All</button>
+                    <button onclick="setAll(false)">Clear All</button>
+                    <span class="status">Tracking <span id="id_count">0</span> IDs</span>
+                </div>
+                <div id="id_list"></div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Length</th>
+                        <th>Data</th>
+                        <th>RX Time (ms)</th>
+                        <th>Age (ms)</th>
+                    </tr>
+                </thead>
+                <tbody id="filtered_body"></tbody>
+            </table>
+        </div>
+    </main>
     <script>
         const GRID_POLL_MS = 600;
         const ID_REFRESH_MS = 3000;
@@ -586,6 +629,10 @@ const char* WebInterface::FILTERED_TEMPLATE = R"html(
 </body>
 </html>
 )html";
+
+// FILTERED_TEMPLATE is now part of HTML_TEMPLATE with client-side navigation
+// This constant is kept for backward compatibility with generateFilteredPage()
+const char* WebInterface::FILTERED_TEMPLATE = WebInterface::HTML_TEMPLATE;
 
 bool WebInterface::initialize(const char* ssid, const char* password)
 {
