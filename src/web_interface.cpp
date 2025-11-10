@@ -10,7 +10,7 @@
 
 namespace
 {
-    constexpr uint32_t CHANGE_EXPIRATION_MS = 10'000;
+    constexpr uint32_t CHANGE_EXPIRATION_MS = 10000;
 
     struct ChangeRecord
     {
