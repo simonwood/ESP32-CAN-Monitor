@@ -4,9 +4,8 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <map>
+#include <vector>
 #include "can_messages.h"  // Forward declaration of CANMessage type
-
-
 
 class WebInterface
 {
@@ -27,6 +26,11 @@ private:
     static String generateHtml();
     static String generateRecentRows();
     static String generateLatestRows();
+    static String generateFilteredPage();
+    static String generateIdListJson();
+    static std::vector<uint32_t> parseIdList(const String& rawIds);
+    static String generateFilteredRows(const std::vector<uint32_t>& ids);
     
     static const char* HTML_TEMPLATE;
+    static const char* FILTERED_TEMPLATE;
 };

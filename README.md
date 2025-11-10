@@ -18,7 +18,7 @@ ESP32-based CAN bus monitor with web interface and configuration portal.
 
 - ESP32-C3 board (esp32-c3-devkitm-1)
 - CAN transceiver connected to GPIO3 (TX) and GPIO4 (RX)
-- Button connected to GPIO9 for configuration mode
+- Button connected to GPIO10 for configuration mode
 - LED on GPIO8 for status indication
 
 ## Building and Flashing
