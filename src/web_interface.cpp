@@ -554,12 +554,12 @@ String WebInterface::generateIdListJson()
 
     std::vector<uint32_t> ids;
     ids.reserve(s_changeHistory.size());
-    for (const auto& entry : s_changeHistory)
+    // Build the ID list from the overall latestMessages map so the
+    // filtered page shows all known IDs regardless of change age.
+    ids.reserve(latestMessages->size());
+    for (const auto& entry : *latestMessages)
     {
-        if (latestMessages->find(entry.first) != latestMessages->end())
-        {
-            ids.push_back(entry.first);
-        }
+        ids.push_back(entry.first);
     }
 
     std::sort(ids.begin(), ids.end());
