@@ -206,6 +206,9 @@ const char* WebInterface::HTML_TEMPLATE = R"html(
                                 document.getElementById('tx_byte_' + index).value = byte;
                             }
                         });
+                        
+                        // Update byte input active/inactive state based on loaded length
+                        updateByteInputs();
                     }
                 });
             });
